@@ -23,5 +23,5 @@ dependencies = ["objcopy"]
 command = "openocd"
 args = [
     "-f", "openocd.cfg",
-    "-c", "program target/thumbv6m-none-eabi/release/gameslab-smc.bin reset"
+    "-c", "program target/thumbv6m-none-eabi/release/gameslab-smc reset exit"
 ]
