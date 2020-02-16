@@ -8,7 +8,7 @@ mod switch;
 mod zynq;
 
 use stm32l0::stm32l0x3 as pac;
-use stm32l0xx_hal::{prelude::*, rcc, syscfg::SYSCFG};
+use stm32l0xx_hal::{exti::Exti, prelude::*, rcc, syscfg::SYSCFG};
 
 #[rtfm::app(device=stm32l0::stm32l0x3, peripherals=true)]
 const APP: () = {
@@ -23,7 +23,7 @@ const APP: () = {
     #[init]
     fn init(cx: init::Context) -> init::LateResources {
         let core = cx.core;
-        let mut peripherals = cx.device;
+        let peripherals = cx.device;
 
         let clock_config = rcc::Config::pll(
             rcc::PLLSource::HSE(12.mhz()),
@@ -31,7 +31,7 @@ const APP: () = {
             rcc::PLLDiv::Div4,
         );
 
-        // flash needs a wait state for this speed
+        // flash needs a wait state for >= 16 MHz sysclock
         peripherals.FLASH.acr.modify(|_, w| w.latency().set_bit());
 
         let mut rcc = peripherals.RCC.freeze(clock_config);
@@ -45,11 +45,19 @@ const APP: () = {
         let mut leds = leds::LedsState::new(gpiob.pb10, gpiob.pb11, peripherals.TIM2, &mut rcc);
         leds.charge_blink();
 
-        let pb0 = gpiob.pb0.into_floating_input();
-        let switch = switch::SwitchState::new(pb0, &mut peripherals.EXTI, &mut syscfg);
+        let mut exti = Exti::new(peripherals.EXTI);
+        let switch =
+            switch::SwitchState::new(gpiob.pb0.into_floating_input(), &mut exti, &mut syscfg);
         let zynq = zynq::ZynqState::new(
-            gpioc.pc0, gpioc.pc1, gpioc.pc2, gpioc.pc3, gpioc.pc4, gpioc.pc5, gpioc.pc6, gpioc.pc7,
-            gpioc.pc8,
+            gpioc.pc0.into_push_pull_output(),
+            gpioc.pc1.into_push_pull_output(),
+            gpioc.pc2.into_push_pull_output(),
+            gpioc.pc3.into_push_pull_output(),
+            gpioc.pc4.into_floating_input(),
+            gpioc.pc5.into_floating_input(),
+            gpioc.pc6.into_floating_input(),
+            gpioc.pc7.into_floating_input(),
+            gpioc.pc8.into_push_pull_output(),
         );
 
         init::LateResources { leds, switch, zynq }

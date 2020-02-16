@@ -2,7 +2,7 @@ use crate::pac::TIM2;
 use stm32l0xx_hal::{
     gpio::{
         gpiob::{PB10, PB11},
-        Floating, Input,
+        Analog,
     },
     prelude::*,
     pwm,
@@ -10,8 +10,8 @@ use stm32l0xx_hal::{
 };
 
 pub struct LedsState {
-    status: pwm::Pwm<TIM2, pwm::C4, pwm::Assigned<PB11<Input<Floating>>>>,
-    charge: pwm::Pwm<TIM2, pwm::C3, pwm::Assigned<PB10<Input<Floating>>>>,
+    status: pwm::Pwm<TIM2, pwm::C4, pwm::Assigned<PB11<Analog>>>,
+    charge: pwm::Pwm<TIM2, pwm::C3, pwm::Assigned<PB10<Analog>>>,
     charge_blinking: bool,
     charge_blinking_up: bool,
     charge_blink_index: usize,
@@ -26,12 +26,7 @@ const BLINK_DUTY_TABLE: [u16; 29] = [
 const STATUS_MAX_DUTY: u16 = 400;
 
 impl LedsState {
-    pub fn new(
-        pb10: PB10<Input<Floating>>,
-        pb11: PB11<Input<Floating>>,
-        tim2: TIM2,
-        rcc: &mut Rcc,
-    ) -> Self {
+    pub fn new(pb10: PB10<Analog>, pb11: PB11<Analog>, tim2: TIM2, rcc: &mut Rcc) -> Self {
         let timer2 = pwm::Timer::new(tim2, 10.khz(), rcc);
         let mut status = timer2.channel4.assign(pb11);
         let mut charge = timer2.channel3.assign(pb10);
