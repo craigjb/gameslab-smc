@@ -5,10 +5,14 @@ extern crate panic_halt;
 
 mod leds;
 mod switch;
+mod uart;
+mod usb;
 mod zynq;
 
+use cortex_m::asm::wfi;
+use hal::{exti::Exti, prelude::*, rcc, syscfg::SYSCFG};
 use stm32l0::stm32l0x3 as pac;
-use stm32l0xx_hal::{exti::Exti, prelude::*, rcc, syscfg::SYSCFG};
+use stm32l0xx_hal as hal;
 
 #[rtfm::app(device=stm32l0::stm32l0x3, peripherals=true)]
 const APP: () = {
@@ -18,6 +22,8 @@ const APP: () = {
         leds: leds::LedsState,
         switch: switch::SwitchState,
         zynq: zynq::ZynqState,
+        usb: usb::UsbState,
+        uart: uart::UartState,
     }
 
     #[init]
@@ -32,10 +38,12 @@ const APP: () = {
         );
 
         // flash needs a wait state for >= 16 MHz sysclock
+        // HAL doesn't support this part yet in the flash module
         peripherals.FLASH.acr.modify(|_, w| w.latency().set_bit());
 
         let mut rcc = peripherals.RCC.freeze(clock_config);
         let mut syscfg = SYSCFG::new(peripherals.SYSCFG, &mut rcc);
+        let gpioa = peripherals.GPIOA.split(&mut rcc);
         let gpiob = peripherals.GPIOB.split(&mut rcc);
         let gpioc = peripherals.GPIOC.split(&mut rcc);
 
@@ -59,18 +67,55 @@ const APP: () = {
             gpioc.pc7.into_floating_input(),
             gpioc.pc8.into_push_pull_output(),
         );
+        let usb = usb::UsbState::new(peripherals.USB, gpioa.pa11, gpioa.pa12, &rcc);
+        let uart = uart::UartState::new(
+            peripherals.LPUART1,
+            gpioc.pc10,
+            gpioc.pc11,
+            peripherals.DMA1,
+            &mut rcc,
+        );
 
-        init::LateResources { leds, switch, zynq }
+        init::LateResources {
+            leds,
+            switch,
+            zynq,
+            usb,
+            uart,
+        }
     }
 
-    #[task(binds=SysTick, resources=[tick, leds, zynq])]
+    #[idle(resources=[uart])]
+    fn idle(mut cx: idle::Context) -> ! {
+        loop {
+            cx.resources.uart.lock(|uart| uart.process(true));
+        }
+    }
+
+    #[task(binds=USB, priority=3, resources=[usb, uart])]
+    fn interrupt_usb(cx: interrupt_usb::Context) {
+        cx.resources.usb.poll();
+        cx.resources.uart.interrupt_usb(cx.resources.usb);
+    }
+
+    #[task(binds=DMA1_CHANNEL2_3, priority=3, resources=[uart, usb])]
+    fn interrupt_dma(mut cx: interrupt_dma::Context) {
+        cx.resources.uart.interrupt_dma(&mut cx.resources.usb);
+    }
+
+    #[task(binds=AES_RNG_LPUART1, priority=3, resources=[uart, usb])]
+    fn interrupt_lpuart(mut cx: interrupt_lpuart::Context) {
+        cx.resources.uart.interrupt_lpuart(&mut cx.resources.usb);
+    }
+
+    #[task(binds=SysTick, priority=2, resources=[tick, leds, zynq])]
     fn tick_100ms(cx: tick_100ms::Context) {
         *cx.resources.tick += 1;
         cx.resources.leds.tick(*cx.resources.tick);
         cx.resources.zynq.tick(*cx.resources.tick);
     }
 
-    #[task(binds = EXTI0_1, resources=[switch, tick, leds, zynq])]
+    #[task(binds = EXTI0_1, priority=2, resources=[switch, tick, leds, zynq])]
     fn interrupt_exti0_1(cx: interrupt_exti0_1::Context) {
         if cx.resources.switch.was_toggled(*cx.resources.tick) {
             cx.resources.zynq.power_toggle();
