@@ -19,8 +19,13 @@ version = "0.9.0"
 features = ["stm32l0x3", "rt"]
 
 [dependencies.stm32l0xx-hal]
-git = "https://github.com/craigjb/stm32l0xx-hal.git"
+path = "../stm32l0xx-hal"
 features = ["stm32l0x3", "rt", "disable-linker-script", "stm32-usbd"]
+
+[dependencies.bbqueue]
+version = "0.4.1"
+default-features = false
+features = ["thumbv6"]
 
 # this lets you use `cargo fix`!
 [[bin]]

@@ -3,13 +3,13 @@
 
 extern crate panic_halt;
 
+mod battery;
 mod leds;
 mod switch;
 mod uart;
 mod usb;
 mod zynq;
 
-use cortex_m::asm::wfi;
 use hal::{exti::Exti, prelude::*, rcc, syscfg::SYSCFG};
 use stm32l0::stm32l0x3 as pac;
 use stm32l0xx_hal as hal;
@@ -19,11 +19,12 @@ const APP: () = {
     struct Resources {
         #[init(0)]
         tick: u32,
-        leds: leds::LedsState,
+        status_led: leds::StatusLed,
         switch: switch::SwitchState,
         zynq: zynq::ZynqState,
         usb: usb::UsbState,
         uart: uart::UartState,
+        battery: battery::BatteryState,
     }
 
     #[init]
@@ -50,9 +51,8 @@ const APP: () = {
         let mut tick_timer = core.SYST.timer(10.hz(), &mut rcc);
         tick_timer.listen();
 
-        let mut leds = leds::LedsState::new(gpiob.pb10, gpiob.pb11, peripherals.TIM2, &mut rcc);
-        leds.charge_blink();
-
+        let (status_led, charge_led) =
+            leds::create_leds(gpiob.pb10, gpiob.pb11, peripherals.TIM2, &mut rcc);
         let mut exti = Exti::new(peripherals.EXTI);
         let switch =
             switch::SwitchState::new(gpiob.pb0.into_floating_input(), &mut exti, &mut syscfg);
@@ -67,6 +67,13 @@ const APP: () = {
             gpioc.pc7.into_floating_input(),
             gpioc.pc8.into_push_pull_output(),
         );
+        let battery = battery::BatteryState::new(
+            peripherals.I2C1,
+            gpiob.pb8,
+            gpiob.pb9,
+            charge_led,
+            &mut rcc,
+        );
         let usb = usb::UsbState::new(peripherals.USB, gpioa.pa11, gpioa.pa12, &rcc);
         let uart = uart::UartState::new(
             peripherals.LPUART1,
@@ -77,18 +84,21 @@ const APP: () = {
         );
 
         init::LateResources {
-            leds,
+            status_led,
             switch,
             zynq,
             usb,
             uart,
+            battery,
         }
     }
 
-    #[idle(resources=[uart])]
+    #[idle(resources=[uart, battery])]
     fn idle(mut cx: idle::Context) -> ! {
         loop {
-            cx.resources.uart.lock(|uart| uart.process(true));
+            cx.resources
+                .battery
+                .lock(|battery| battery.update_if_needed());
         }
     }
 
@@ -108,21 +118,21 @@ const APP: () = {
         cx.resources.uart.interrupt_lpuart(&mut cx.resources.usb);
     }
 
-    #[task(binds=SysTick, priority=2, resources=[tick, leds, zynq])]
+    #[task(binds=SysTick, priority=2, resources=[tick, zynq, battery])]
     fn tick_100ms(cx: tick_100ms::Context) {
         *cx.resources.tick += 1;
-        cx.resources.leds.tick(*cx.resources.tick);
+        cx.resources.battery.tick(*cx.resources.tick);
         cx.resources.zynq.tick(*cx.resources.tick);
     }
 
-    #[task(binds = EXTI0_1, priority=2, resources=[switch, tick, leds, zynq])]
+    #[task(binds = EXTI0_1, priority=2, resources=[switch, tick, status_led, zynq])]
     fn interrupt_exti0_1(cx: interrupt_exti0_1::Context) {
         if cx.resources.switch.was_toggled(*cx.resources.tick) {
             cx.resources.zynq.power_toggle();
             if cx.resources.zynq.is_power_on() {
-                cx.resources.leds.status_on();
+                cx.resources.status_led.on();
             } else {
-                cx.resources.leds.status_off();
+                cx.resources.status_led.off();
             }
         }
     }
