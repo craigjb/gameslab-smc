@@ -1,3 +1,4 @@
+use super::power;
 use stm32l0xx_hal::{
     gpio::{
         gpioc::{PC0, PC1, PC2, PC3, PC4, PC5, PC6, PC7, PC8},
@@ -66,6 +67,7 @@ impl ZynqState {
     }
 
     pub fn power_up(&mut self) {
+        power::set_sleep_power_state(true);
         self.power_state = match self.power_state {
             // if we're already powering on, don't do anything
             PowerState::On
@@ -86,6 +88,7 @@ impl ZynqState {
     }
 
     pub fn power_down(&mut self) {
+        power::set_sleep_power_state(false);
         self.power_state = match self.power_state {
             PowerState::Off
             | PowerState::Stage3Down

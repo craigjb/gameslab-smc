@@ -5,6 +5,7 @@ extern crate panic_halt;
 
 mod battery;
 mod leds;
+mod power;
 mod switch;
 mod uart;
 mod usb;
@@ -74,7 +75,15 @@ const APP: () = {
             charge_led,
             &mut rcc,
         );
-        let usb = usb::UsbState::new(peripherals.USB, gpioa.pa11, gpioa.pa12, &rcc);
+        let usb = usb::UsbState::new(
+            peripherals.USB,
+            gpioa.pa11,
+            gpioa.pa12,
+            &rcc,
+            gpioa.pa10.into_floating_input(),
+            &mut exti,
+            &mut syscfg,
+        );
         let uart = uart::UartState::new(
             peripherals.LPUART1,
             gpioc.pc10,
@@ -93,12 +102,15 @@ const APP: () = {
         }
     }
 
-    #[idle(resources=[uart, battery])]
+    #[idle(resources=[uart, battery, usb])]
     fn idle(mut cx: idle::Context) -> ! {
         loop {
             cx.resources
                 .battery
                 .lock(|battery| battery.update_if_needed());
+            if power::sleep_if_needed() {
+                cx.resources.usb.lock(|usb| usb.reset());
+            }
         }
     }
 
@@ -125,9 +137,14 @@ const APP: () = {
         cx.resources.zynq.tick(*cx.resources.tick);
     }
 
-    #[task(binds = EXTI0_1, priority=2, resources=[switch, tick, status_led, zynq])]
+    #[task(binds = EXTI4_15, priority=2, resources=[usb])]
+    fn interrupt_exti15_4(mut cx: interrupt_exti15_4::Context) {
+        cx.resources.usb.lock(|usb| usb.handle_detect_interrupt());
+    }
+
+    #[task(binds = EXTI0_1, priority=2, resources=[switch, status_led, zynq])]
     fn interrupt_exti0_1(cx: interrupt_exti0_1::Context) {
-        if cx.resources.switch.was_toggled(*cx.resources.tick) {
+        if cx.resources.switch.was_toggled() {
             cx.resources.zynq.power_toggle();
             if cx.resources.zynq.is_power_on() {
                 cx.resources.status_led.on();
