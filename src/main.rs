@@ -6,7 +6,7 @@ extern crate panic_halt;
 use stm32l0xx_hal::gpio::{gpiob::PB11, Output, PushPull};
 use stm32l0xx_hal::{prelude::*, rcc, timer::Timer};
 
-#[rtfm::app(device=stm32l0::stm32l0x3, peripherals=true)]
+#[rtic::app(device=stm32l0::stm32l0x3, peripherals=true)]
 const APP: () = {
     struct Resources {
         status_led: PB11<Output<PushPull>>,
