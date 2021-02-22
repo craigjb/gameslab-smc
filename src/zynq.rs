@@ -88,7 +88,6 @@ impl ZynqState {
     }
 
     pub fn power_down(&mut self) {
-        power::set_sleep_power_state(false);
         self.power_state = match self.power_state {
             PowerState::Off
             | PowerState::Stage3Down
@@ -196,6 +195,7 @@ impl ZynqState {
             }
             PowerState::Stage0Down => {
                 if self.power_supplies.pg_1v0.is_low().unwrap() {
+                    power::set_sleep_power_state(false);
                     PowerState::Off
                 } else {
                     self.power_state.clone()
