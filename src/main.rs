@@ -92,6 +92,8 @@ const APP: () = {
             &mut rcc,
         );
 
+        power::init();
+
         init::LateResources {
             status_led,
             switch,

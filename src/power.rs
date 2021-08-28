@@ -1,4 +1,5 @@
 use crate::pac::{CorePeripherals, PWR, RCC};
+use crate::pac::{GPIOA, GPIOB, GPIOC};
 use cortex_m::asm::{dsb, wfi};
 
 pub struct PowerState {
@@ -7,6 +8,9 @@ pub struct PowerState {
     hseon: bool,
     pllon: bool,
     sw_bits: u8,
+    gpioa_mode: Option<u32>,
+    gpiob_mode: Option<u32>,
+    gpioc_mode: Option<u32>,
 }
 
 static mut POWER_STATE: PowerState = PowerState {
@@ -15,6 +19,9 @@ static mut POWER_STATE: PowerState = PowerState {
     sw_bits: 0,
     hseon: false,
     pllon: false,
+    gpioa_mode: None,
+    gpiob_mode: None,
+    gpioc_mode: None,
 };
 
 pub fn set_sleep_power_state(state: bool) {
@@ -27,6 +34,11 @@ pub fn set_usb_connected(state: bool) {
     unsafe {
         POWER_STATE.usb_connected = state;
     }
+}
+
+pub fn init() {
+    let rcc = unsafe { &*RCC::ptr() };
+    rcc.apb1enr.modify(|_, w| w.pwren().set_bit());
 }
 
 pub fn sleep_if_needed() -> bool {
@@ -50,6 +62,8 @@ pub fn sleep_if_needed() -> bool {
         POWER_STATE.pllon = rcc.cr.read().pllon().bit_is_set();
     }
 
+    prepare_gpio_for_sleep();
+
     // Switch internal OSC to HSI
     rcc.cfgr.modify(|_, w| w.sw().bits(0b01));
     while rcc.cfgr.read().sw().bits() != 0b01 {}
@@ -66,8 +80,8 @@ pub fn sleep_if_needed() -> bool {
             .set_bit()
             .pdds()
             .stop_mode()
-            .lpds()
-            .set_bit()
+            .lpsdsr()
+            .low_power_mode()
     });
 
     // Wait for WUF to be cleared
@@ -77,8 +91,43 @@ pub fn sleep_if_needed() -> bool {
     dsb();
     wfi();
 
+    wake_gpio_from_sleep();
     handle_wakeup();
     return true;
+}
+
+fn prepare_gpio_for_sleep() {
+    unsafe {
+        let gpioa = &*GPIOA::ptr();
+        let gpioa_mode = gpioa.moder.read().bits();
+        POWER_STATE.gpioa_mode = Some(gpioa_mode);
+        let gpiob = &*GPIOB::ptr();
+        let gpiob_mode = gpiob.moder.read().bits();
+        POWER_STATE.gpiob_mode = Some(gpiob_mode);
+        let gpioc = &*GPIOC::ptr();
+        POWER_STATE.gpioc_mode = Some(gpioc.moder.read().bits());
+
+        gpioa.moder.write(|w| w.bits(0xFFCFFFFF | gpioa_mode));
+        gpiob.moder.write(|w| w.bits(0xFFFFFFFC | gpiob_mode));
+        gpioc.moder.write(|w| w.bits(0xFFFFFFFF));
+    }
+}
+
+fn wake_gpio_from_sleep() {
+    unsafe {
+        if let Some(mode) = POWER_STATE.gpioa_mode {
+            let gpioa = &*GPIOA::ptr();
+            gpioa.moder.write(|w| w.bits(mode));
+        }
+        if let Some(mode) = POWER_STATE.gpiob_mode {
+            let gpiob = &*GPIOB::ptr();
+            gpiob.moder.write(|w| w.bits(mode));
+        }
+        if let Some(mode) = POWER_STATE.gpioc_mode {
+            let gpioc = &*GPIOC::ptr();
+            gpioc.moder.write(|w| w.bits(mode));
+        }
+    }
 }
 
 fn handle_wakeup() {
